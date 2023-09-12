@@ -1,13 +1,14 @@
 /**
    NANO SMART IOT
 
-   Controlador: TCALL ESP32 - SIM800L
-   Date: 07/09/2023
+   Controlador: TTCALL ESP32 - SIM800L
+   Date: 12/09/2023
    Autor: Walter Dawid Retzer
-   Comunicação: ESPNOW SLAVE
-   Firmware: V1.0.0
+   Tipo: ESPNOW SLAVE
+   Firmware: V1.0.1
    
-   Note: Configuração de envio dos dados o servidor ThingSpeak;
+   Note: Ajuste do watchdog timer, para que não haja acionamento do watchdog durante a conexão com o ThingSpeak;
+         Configuração de envio dos dados o servidor ThingSpeak;
          Configuração de inicialização do modem SIM800L;
          Configuração e estabilidade de conexão do modo GPRS do modem SIM800L;
 */
@@ -16,15 +17,18 @@
 #include "utilities.h"         // Biblioteca de configuração inicial do módulo SIM800L
 #define TINY_GSM_MODEM_SIM800  // Select your modem: SIM800L
 
-#include <SoftwareSerial.h>  // Biblioteca para comunicação Serial entre o ESP32 e SIM800L
-#include <TinyGsmClient.h>   // Biblioteca com funções do SIM800L
-#include <PubSubClient.h>    // Biblioteca para auxiliar na comunicação com o Server ThingsPeak
-#include <String.h>          // Biblioteca para uso de Strings
-#include <time.h>            // Biblioteca para uso de variaveis de Tempo
-#include <TimeLib.h>         // Biblioteca para uso de variaveis de Tempo
-#include <esp_now.h>         // Biblioteca para uso do Esp Now comunications
-#include <WiFi.h>            // Biblioteca para uso do WIFI
-#include <ArduinoJson.h>     // Biblioteca para uso do formato Json
+#include <SoftwareSerial.h>          // Biblioteca para comunicação Serial entre o ESP32 e SIM800L
+#include <TinyGsmClient.h>           // Biblioteca com funções do SIM800L
+#include <PubSubClient.h>            // Biblioteca para auxiliar na comunicação com o Server ThingsPeak
+#include <String.h>                  // Biblioteca para uso de Strings
+#include <time.h>                    // Biblioteca para uso de variaveis de Tempo
+#include <TimeLib.h>                 // Biblioteca para uso de variaveis de Tempo
+#include <esp_now.h>                 // Biblioteca para uso do Esp Now comunications
+#include <WiFi.h>                    // Biblioteca para uso do WIFI
+#include <ArduinoJson.h>             // Biblioteca para uso do formato Json
+#include "soc/timer_group_struct.h"  // Biblioteca para uso do tempo para desabilitar o watchdog
+#include "soc/timer_group_reg.h"     // Biblioteca para uso do tempo para desabilitar o watchdog
+
 
 //========================================================================================================
 // Variaveis de Configuração do Modem Sim800L:
@@ -36,7 +40,7 @@
 #define GSM_PIN ""                // set GSM PIN, if any
 #define TINY_GSM_RX_BUFFER 4096   // Set RX buffer to 1Kb
 //========================================================================================================
-// Variavel de Configuração do Modo Slave do ESP NOW:
+// Variavel de Configuração do Modo Slave do ESP-NOW:
 #define CHANNEL 1
 //========================================================================================================
 // Variaveis de Configuração de acesso a conexão GPRS do chip sim utilizado no modem SIM800L:
@@ -49,11 +53,11 @@ char clientIdMQTT[] = "XXXXXXXXXXXXXXXXXXXXXXX";
 char mqttUserName[] = "YYYYYYYYYYYYYYYYYYYYYYY";
 char mqttPassword[] = "ZZZZZZZZZZZZZZZZZZZZZZZ";
 char server_T1[] = "mqtt3.thingspeak.com";
-long channelID = 9999999;
+long channelID = 2253688;
 char typeThingspeak[] = "Thingspeak";
 int statusServer;
 // ========================================================================================================
-// Variaveis de dados recebidos via ESPNOW do ESP32 em modo Master:
+// Variaveis de dados recebidos via ESP-NOW do ESP32 em modo Master:
 String jsonData;
 StaticJsonDocument<200> doc;
 int chiller = 2;
@@ -93,12 +97,18 @@ PubSubClient mqtt(client);
 /****************************************SETUP***********************************************************/
 void setup() {
   Serial.begin(115200);
-  Serial.println("ESPNOW CONFIG IN SLAVE");
+  delay(5000);
+  Serial.println(" ");
+  Serial.println("**************************************************************************************************************************************** ");
+  Serial.println("NANO SMART: ESP-NOW CONFIG IN SLAVE");
+  Serial.println("Firmware Version: 1.0.1");
 
   WiFi.mode(WIFI_AP);
-  configDeviceAP();
-  Serial.print("AP MAC: ");
+  configSlaveDevice();
+  Serial.print("Slave Address MAC: ");
   Serial.println(WiFi.softAPmacAddress());
+  Serial.println("**************************************************************************************************************************************** ");
+  Serial.println(" ");
 
   setupSimModem();
 
@@ -115,6 +125,9 @@ void setup() {
 /****************************************LOOP************************************************************/
 void loop() {
   if (millis() - auxTimeLed > intervalo) {
+    TIMERG0.wdt_wprotect = TIMG_WDT_WKEY_VALUE;
+    TIMERG0.wdt_feed = 1;
+    TIMERG0.wdt_wprotect = 0;
     ledState = !ledState;
     digitalWrite(LED_GPIO, ledState);
     auxTimeLed = millis();
@@ -127,26 +140,31 @@ void loop() {
 /************************************INIT_ESP_NOW********************************************************/
 void InitESPNow() {
   WiFi.disconnect();
+  Serial.println(" ");
+  Serial.println("**************************************************************************************************************************************** ");
   if (esp_now_init() == ESP_OK) {
-    Serial.println("ESPNow Init Success");
+    Serial.println("Comunicação ESP-NOW: Ativada com Sucesso");
   } else {
-    Serial.println("ESPNow Init Failed");
+    Serial.println("Comunicação ESP-NOW: Em Falha!!");
     ESP.restart();
   }
+  Serial.println("**************************************************************************************************************************************** ");
+  Serial.println(" ");
 }
 /**********************************END_INIT_ESP_NOW******************************************************/
 
 
 
-/**********************************cONFIG_DEVICE_AP******************************************************/
-void configDeviceAP() {
+/*******************************CONFIG_SLAVE_DEVICE******************************************************/
+void configSlaveDevice() {
   const char *SSID = "Slave_1";
   bool result = WiFi.softAP(SSID, "Slave_1_Password", CHANNEL, 0);
   if (!result) {
-    Serial.println("AP Config failed.");
+    Serial.println("Config Slave Device Failed!");
   } else {
-    Serial.println("AP Config Success. Broadcasting with AP: " + String(SSID));
-    Serial.print("AP CHANNEL ");
+    Serial.println("ESP-NOW Configuração: Modo Slave Device Configurada com Sucesso!");
+    Serial.println("ESP-NOW Broadcasting ID Address: " + String(SSID));
+    Serial.print("ESP-NOW Slave Device Channel: ");
     Serial.println(WiFi.channel());
   }
 }
@@ -163,9 +181,12 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
   snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
            mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
 
-  Serial.print("Last Packet Recv from: ");
+  Serial.println(" ");
+  Serial.println("**************************************************************************************************************************************** ");
+  Serial.println("ESP-NOW: Comunicação Recebida com Sucesso!");
+  Serial.print("ESP-NOW: Envio de Dados do ESP-32 MAC Address=");
   Serial.println(macStr);
-  Serial.print("Last Packet Recv Data: ");
+  Serial.print("ESP-NOW: Dados Recebidos=");
   Serial.println(jsonData);
 
   if (!error) {
@@ -176,7 +197,7 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
     temp3 = doc["TI-003"];
     temp4 = doc["TI-004"];
 
-    Serial.print("Chiller1: ");
+    Serial.print("Status Chiller: ");
     Serial.println(chiller);
 
     Serial.print("Temp1: ");
@@ -191,13 +212,15 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
     Serial.print("Temp4: ");
     Serial.println(temp4);
 
-    Serial.println("");
+    Serial.println("**************************************************************************************************************************************** ");
+    SerialMon.println(" ");
   }
 
   else {
     Serial.println("Falha na Deserialização!!");
     Serial.println(error.f_str());
-    Serial.println("");
+    Serial.println("**************************************************************************************************************************************** ");
+    SerialMon.println(" ");
     return;
   }
 
@@ -205,12 +228,19 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
 
   bool isSimGprsConnected = modem.isGprsConnected();
   if (!isSimGprsConnected) {
+
+    SerialMon.println(" ");
+    Serial.println("**************************************************************************************************************************************** ");
     SerialMon.print("Habilitando conexão GPRS: ");
     if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
       SerialMon.println("Sem conexão GPRS!!");
       delay(10000);
+      Serial.println("**************************************************************************************************************************************** ");
+      SerialMon.println(" ");
     } else {
       SerialMon.println("Conexão GPRS iniciada!");
+      Serial.println("**************************************************************************************************************************************** ");
+      SerialMon.println(" ");
     }
   }
 }
@@ -220,20 +250,21 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
 
 /*****************************SEND_DATA_TO_SERVER_IOT****************************************************/
 void sendDataToServerIoT(char *serverIoT, char *serverType, long channelID, char *clienId, char *userName, char *password, char *topic) {
-  SerialMon.print("Connecting to ");
-  SerialMon.print(serverIoT);
   SerialMon.println(" ");
+  Serial.println("****************************************************************************************************************************************");
+  SerialMon.print("Connectando ao Server: ");
+  SerialMon.println(serverIoT);
 
   client.connect(serverIoT, 1883);
 
   if (!client.connected()) {
-    SerialMon.println("Servidor: Sem Conexão!");
+    SerialMon.println("Status Servidor: Sem Conexão!");
   } else {
-    SerialMon.println("Servidor: Status Conectado!");
+    SerialMon.println("Status Servidor: Conectado!");
   }
 
   if (!mqtt.connected()) {
-    SerialMon.println("Conexão");
+    SerialMon.print("Conexão MQTT: ");
     if (!!!mqtt.connect(clienId, userName, password)) {
 
       statusServer = mqtt.state();
@@ -276,11 +307,11 @@ void sendDataToServerIoT(char *serverIoT, char *serverType, long channelID, char
   }
 
   if (statusServer == 0) {
-    SerialMon.println("Conectado");
+    SerialMon.println("CONNECTION AUTHORIZED");
     int sinal = modem.getSignalQuality();
     int status = digitalRead(STATUS_CHILLER);
-    SerialMon.print("Chiller: ");
-    SerialMon.println(status);
+    SerialMon.print("Status Chiller: ");
+    SerialMon.println(!status);
     float field1 = temp;
     float field2 = temp2;
     float field3 = temp3;
@@ -296,7 +327,7 @@ void sendDataToServerIoT(char *serverIoT, char *serverType, long channelID, char
       const char *msgBuffer;
       msgBuffer = data.c_str();
 
-      SerialMon.println("STRING:");
+      SerialMon.print("String JSON Enviada: ");
       SerialMon.println(data);
 
       String topicString = "channels/" + String(channelID) + "/publish";
@@ -307,7 +338,15 @@ void sendDataToServerIoT(char *serverIoT, char *serverType, long channelID, char
       bool status_publict1 = mqtt.publish(topicBuffer, msgBuffer);
 
       if (status_publict1) {
-        SerialMon.println("Mensagem Publicada!");
+        SerialMon.println("Mensagem JSON: Valores Publicados no Server ThingSpeak!");
+        Serial.println("**************************************************************************************************************************************** ");
+        SerialMon.println(" ");
+        sendATCommand("AT+CIPCLOSE=0,1");
+        mqtt.disconnect();
+      } else {
+        SerialMon.println("Mensagem JSON: Valores Não Publicados no Server ThingSpeak!!");
+        Serial.println("**************************************************************************************************************************************** ");
+        SerialMon.println(" ");
         sendATCommand("AT+CIPCLOSE=0,1");
         mqtt.disconnect();
       }
@@ -322,6 +361,8 @@ void sendDataToServerIoT(char *serverIoT, char *serverType, long channelID, char
 String sendATCommand(String command) {
 
   String response = "Fail";
+  SerialMon.println(" ");
+  Serial.println("**************************************************************************************************************************************** ");
   SerialMon.print("SIM800L Send Command: ");
   SerialMon.println(command);
   SerialAT.println(command);
@@ -333,7 +374,9 @@ String sendATCommand(String command) {
     response.trim();
     SerialMon.print("SIM800L Response: ");
     SerialMon.print(response);
-    SerialMon.println("");
+    SerialMon.println(" ");
+    Serial.println("**************************************************************************************************************************************** ");
+    SerialMon.println(" ");
   }
 
   return response;
@@ -349,14 +392,15 @@ void setupSimModem() {
   SerialAT.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
   delay(6000);
 
-  SerialMon.println("Iniciando modem...");
+  Serial.println(" ");
+  Serial.println("**************************************************************************************************************************************** ");
+  SerialMon.println("Iniciando SIM800L...");
   modem.restart();
 
   String modemInfo = modem.getModemInfo();
-  SerialMon.print("Modem Info: ");
+  SerialMon.print("SIM800L Info: ");
   SerialMon.println(modemInfo);
-  SerialMon.println(" ");
-  delay(3000);
+  delay(1000);
 
 // Unlock your SIM card with a PIN if needed
 #if TINY_GSM_USE_GPRS
@@ -373,7 +417,6 @@ void setupSimModem() {
   } else {
     SerialMon.println("Chip conectado na rede GSM da VIVO!");
   }
-  SerialMon.println(" ");
   delay(1000);
 
   SerialMon.print("Habilitando conexão com a internet: ");
@@ -382,39 +425,40 @@ void setupSimModem() {
   } else {
     SerialMon.println("Sem acesso à Internet!");
   }
-  SerialMon.println(" ");
   delay(1000);
 
-  SerialMon.print("Habilitando conexão GPRS: ");
+  SerialMon.print("Ativando conexão GPRS: ");
   if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
     SerialMon.println("Sem conexão GPRS!!");
     delay(10000);
     return;
   } else {
-    SerialMon.println("Conexão GPRS iniciada!");
+    SerialMon.println("Conexão GPRS Ativada!");
   }
-  SerialMon.println(" ");
   delay(1000);
 
   SerialMon.print("Status Conexão GPRS: ");
   if (modem.isGprsConnected()) {
-    SerialMon.println("GPRS connected!");
+    SerialMon.println("GPRS Connected!");
   } else {
-    SerialMon.println("GPRS not connected!");
+    SerialMon.println("GPRS Not Connected!");
   }
-  SerialMon.println(" ");
   delay(1000);
 
   int sinal = modem.getSignalQuality();
-  SerialMon.print("Sinal Quality: ");
-  SerialMon.println(sinal);
-  SerialMon.println(" ");
+  SerialMon.print("Sinal GSM Quality: ");
+  SerialMon.print(sinal);
+  SerialMon.println("dB");
   delay(1000);
 
   IPAddress ip = modem.localIP();
   SerialMon.print("IP: ");
   SerialMon.println(ip);
+  Serial.println("**************************************************************************************************************************************** ");
   SerialMon.println(" ");
+  delay(1000);
+
+  sendATCommand("AT+GSMBUSY=1");
   delay(1000);
 }
 /*******************************END_SETUP_SIM_MODEM*****************************************************/
