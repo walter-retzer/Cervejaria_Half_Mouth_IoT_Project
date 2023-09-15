@@ -1,6 +1,7 @@
 # Cervejaria_Half_Mouth_IoT_Project
 
 Monitoramento Remoto da Cervejaria HalfMouth.
+![Img](IMAGES/halfmouth.jpg)
 
 ## - Objetivo
 
@@ -35,11 +36,19 @@ A comunicação é feita conforme mostra a imagem abaixo:
 ## - Resultados
 
 A Internet das Coisas (em inglês: *Internet of Things*, IoT) descreve a rede de “objetos físicos” incorporados a sensores, software e outras tecnologias com o objetivo de conectar e trocar dados com outros dispositivos e sistemas pela internet. 
-Através da integração com a plataforma ThingSpeak, é possível monitorar a temperatura, funcionamento do chiller e camara fria através de celulares utilzando o aplicativo ThingViewer, ou acessando diretamente a página web do servidor com login e senha respectivamente.
+Através da integração com a plataforma ThingSpeak, é possível monitorar a temperatura, funcionamento da bomba de recirculação, do chiller e da camara fria através de celulares utilzando o aplicativo ThingViewer, ou acessando diretamente a página web do servidor com login e senha respectivamente.
 Os dados são enviados a cada 5min ao ThingSpeak, foi implementado adicionalmente no programa para que os dados sejam também gravados localmente no cartão de memória.
 
 ### Monitoramento da Temperatura:
-![Img](IMAGES/temperaturas.png)
+![Img](IMAGES/fermentadores_temperaturas.png)
 
-### Monitoramento do Funcionamento da Camara Fria e Chiller:
-![Img](IMAGES/status.png)
+![Img](IMAGES/termometros.png)
+
+### Monitoramento do Funcionamento da Bomba de Recirculação:
+![Img](IMAGES/bomba.png)
+
+### Monitoramento do Funcionamento da Camara Fria:
+![Img](IMAGES/camarafria.png)
+
+### Monitoramento do Funcionamento do Chiller:
+![Img](IMAGES/chiller.png)
