@@ -1,7 +1,7 @@
 # Cervejaria_Half_Mouth_IoT_Project
 
 Monitoramento Remoto da Cervejaria HalfMouth.
-![Img](IMAGES/halfmouth.jpg)
+![Img](IMAGES/halfmouth.jpeg)
 
 ## - Objetivo
 
