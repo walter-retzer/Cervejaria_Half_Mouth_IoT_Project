@@ -2,15 +2,13 @@
    NANO SMART IOT
 
    Controlador: TTCALL ESP32 - SIM800L
-   Date: 12/09/2023
+   Date: 15/09/2023
    Autor: Walter Dawid Retzer
    Tipo: ESPNOW SLAVE
    Firmware: V1.0.1
    
-   Note: Ajuste do watchdog timer, para que não haja acionamento do watchdog durante a conexão com o ThingSpeak;
-         Configuração de envio dos dados o servidor ThingSpeak;
-         Configuração de inicialização do modem SIM800L;
-         Configuração e estabilidade de conexão do modo GPRS do modem SIM800L;
+   Note: Inclusão do monitoramento da temperatura do fluído de resfriamento;
+         Ajuste das variaveis enviadas ao ThingSpeak;
 */
 
 #define SIM800L_IP5306_VERSION_20200811
@@ -28,6 +26,7 @@
 #include <ArduinoJson.h>             // Biblioteca para uso do formato Json
 #include "soc/timer_group_struct.h"  // Biblioteca para uso do tempo para desabilitar o watchdog
 #include "soc/timer_group_reg.h"     // Biblioteca para uso do tempo para desabilitar o watchdog
+#include <esp_adc_cal.h>             // Biblioteca para realizar a leitura dos valores de temperatura dos sensores NTC
 
 
 //========================================================================================================
@@ -53,7 +52,7 @@ char clientIdMQTT[] = "XXXXXXXXXXXXXXXXXXXXXXX";
 char mqttUserName[] = "YYYYYYYYYYYYYYYYYYYYYYY";
 char mqttPassword[] = "ZZZZZZZZZZZZZZZZZZZZZZZ";
 char server_T1[] = "mqtt3.thingspeak.com";
-long channelID = 2253688;
+long channelID = 9999999;
 char typeThingspeak[] = "Thingspeak";
 int statusServer;
 // ========================================================================================================
@@ -61,11 +60,12 @@ int statusServer;
 String jsonData;
 StaticJsonDocument<200> doc;
 int chiller = 2;
+int bomb = 2;
 int camara = 2;
-int temp = 0;
-int temp2 = 0;
-int temp3 = 0;
-int temp4 = 0;
+double temp = 0;
+double temp2 = 0;
+double temp3 = 0;
+double temp4 = 0;
 // ========================================================================================================
 // Variaveis auxiliares do loop:
 unsigned long intervalo = 250;
@@ -88,9 +88,37 @@ TinyGsmClient client(modem);
 PubSubClient mqtt(client);
 // ========================================================================================================
 // Variaveis auxiliares de status do chiller:
-#define STATUS_CHILLER 21
-// ========================================================================================================
-
+#define STATUS_CHILLER 2
+#define GND_CHILLER 0
+//========================================================================================================
+// Variaveis de Configuração da Medição de Temperatura com Termistor:
+esp_adc_cal_characteristics_t adc_cal;  //Estrutura que contem as informacoes para calibracao
+bool esp32 = true;
+int thermistorPin;
+double adcMax, vccThermistor;
+String TempReal;
+double R1 = 10000.0;        // resitor 10k
+double Beta = 3950.0;       // Beta value
+double To = 298.15;         // temperatura em Kelvin
+double Ro = 10000.0;        // resitor 10k em Paralelo
+double offsetTemp1 = 3.40;  // valor de offset da temperatura 1
+double offsetTemp2 = 2.55;  // valor de offset da temperatura 2
+double offsetTemp3 = 0;     // valor de offset da temperatura 3
+double offsetTemp4 = 9.0;   // valor de offset da temperatura 4
+double tempCelsius = 0;
+double tempCelsius1 = 0;
+double tempCelsiusMax1 = 0;
+double tempCelsiusMin1 = 0;
+double tempCelsius2 = 0;
+double tempCelsiusMax2 = 0;
+double tempCelsiusMin2 = 0;
+double tempCelsius3 = 0;
+double tempCelsiusMax3 = 0;
+double tempCelsiusMin3 = 0;
+double tempCelsius4 = 0;
+double tempCelsiusMax4 = 0;
+double tempCelsiusMin4 = 0;
+//========================================================================================================
 
 
 
@@ -101,7 +129,7 @@ void setup() {
   Serial.println(" ");
   Serial.println("**************************************************************************************************************************************** ");
   Serial.println("NANO SMART: ESP-NOW CONFIG IN SLAVE");
-  Serial.println("Firmware Version: 1.0.1");
+  Serial.println("Firmware Version: 1.0.0");
 
   WiFi.mode(WIFI_AP);
   configSlaveDevice();
@@ -109,6 +137,20 @@ void setup() {
   Serial.println(WiFi.softAPmacAddress());
   Serial.println("**************************************************************************************************************************************** ");
   Serial.println(" ");
+
+
+  adc1_config_width(ADC_WIDTH_BIT_12);
+  adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_0);                                                              //pin 34 esp32 devkit v1
+  esp_adc_cal_value_t adc_type = esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_0, ADC_WIDTH_BIT_12, 1100, &adc_cal);  //Inicializa a estrutura de calibracao
+
+  adcMax = 4095.0;      // ADC 12-bit (0-4095)
+  vccThermistor = 3.3;  // Alimentação VCC Termistor
+  readTermistor(ADC1_CHANNEL_5, 33);
+  tempCelsiusMax4 = -100.00;
+  tempCelsiusMin4 = 100.00;
+
+  pinMode(GND_CHILLER, OUTPUT);
+  digitalWrite(GND_CHILLER, LOW);
 
   setupSimModem();
 
@@ -190,7 +232,7 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
   Serial.println(jsonData);
 
   if (!error) {
-    chiller = doc["CHILLER-001"];
+    bomb = doc["BOMB-001"];
     camara = doc["CAMARA-001"];
     temp = doc["TI-001"];
     temp2 = doc["TI-002"];
@@ -302,8 +344,8 @@ void sendDataToServerIoT(char *serverIoT, char *serverType, long channelID, char
   }
 
   if (statusServer != 0) {
-    mqtt.disconnect();
-    delay(1000);
+    Serial.println("Falha em Conectar com o Server ThingSpeak!!");
+    ESP.restart();
   }
 
   if (statusServer == 0) {
@@ -316,13 +358,13 @@ void sendDataToServerIoT(char *serverIoT, char *serverType, long channelID, char
     float field2 = temp2;
     float field3 = temp3;
     float field4 = temp4;
-    // float field5 = chiller;
-    float field5 = !status;
+    float field5 = tempCelsius4;
     float field6 = camara;
-    float field7 = sinal;
+    float field7 = bomb;
+    float field8 = !status;
 
     if (serverType == typeThingspeak) {
-      String data = String("field1=") + String(field1, 1) + "&field2=" + String(field2, 1) + "&field3=" + String(field3, 1) + "&field4=" + String(field4, 1) + "&field5=" + String(field5, 0) + "&field6=" + String(field6, 0) + "&field7=" + String(field7, 0);
+      String data = String("field1=") + String(field1, 2) + "&field2=" + String(field2, 2) + "&field3=" + String(field3, 2) + "&field4=" + String(field4, 2) + "&field5=" + String(field5, 2) + "&field6=" + String(field6, 0) + "&field7=" + String(field7, 0) + "&field8=" + String(field8, 0);
       int length = data.length();
       const char *msgBuffer;
       msgBuffer = data.c_str();
@@ -350,6 +392,7 @@ void sendDataToServerIoT(char *serverIoT, char *serverType, long channelID, char
         sendATCommand("AT+CIPCLOSE=0,1");
         mqtt.disconnect();
       }
+      readTermistor(ADC1_CHANNEL_5, 33);
     }
   }
 }
@@ -462,3 +505,78 @@ void setupSimModem() {
   delay(1000);
 }
 /*******************************END_SETUP_SIM_MODEM*****************************************************/
+
+/************************************READ_TERMISTOR*******************************************************/
+void readTermistor(adc1_channel_t channel, int thermistorPin) {
+  uint32_t AD = 0;
+  for (int i = 0; i < 100; i++) {
+    AD += adc1_get_raw(channel);  //Obtem o valor RAW do ADC
+    ets_delay_us(30);
+  }
+  AD /= 100;
+
+  double vOut, Rt = 0;
+  double tempKelvin = 0;
+  double adc = 0;
+
+  adc = analogRead(thermistorPin);
+  adc = AD;
+  vOut = adc * vccThermistor / adcMax;
+  Rt = R1 * vOut / (vccThermistor - vOut);
+  tempKelvin = 1 / (1 / To + log(Rt / Ro) / Beta);  //  Kelvin
+  tempCelsius = tempKelvin - 273.15;                // Celsius
+
+  SerialMon.println(" ");
+  Serial.println("**************************************************************************************************************************************** ");
+
+  if (channel == 4) {
+    tempCelsius3 = tempCelsius - offsetTemp3;
+    Serial.print(F("Temperatura Celsius TI-003: "));
+    Serial.println(tempCelsius3);
+    if (tempCelsius3 < tempCelsiusMin3) {
+      tempCelsiusMin3 = tempCelsius3;
+    }
+    if (tempCelsius3 > tempCelsiusMax3) {
+      tempCelsiusMax3 = tempCelsius3;
+    }
+  }
+
+  if (channel == 5) {
+    tempCelsius4 = tempCelsius + offsetTemp4;
+    Serial.print(F("Temperatura Celsius TI-004: "));
+    Serial.println(tempCelsius4);
+    if (tempCelsius4 < tempCelsiusMin4) {
+      tempCelsiusMin4 = tempCelsius4;
+    }
+    if (tempCelsius4 > tempCelsiusMax4) {
+      tempCelsiusMax4 = tempCelsius4;
+    }
+  }
+
+  if (channel == 6) {
+    tempCelsius1 = tempCelsius + offsetTemp1;
+    Serial.print(F("Temperatura Celsius TI-001: "));
+    Serial.println(tempCelsius1);
+    if (tempCelsius1 < tempCelsiusMin1) {
+      tempCelsiusMin1 = tempCelsius1;
+    }
+    if (tempCelsius1 > tempCelsiusMax1) {
+      tempCelsiusMax1 = tempCelsius1;
+    }
+  }
+
+  if (channel == 7) {
+    tempCelsius2 = tempCelsius + offsetTemp2;
+    Serial.print(F("Temperatura Celsius TI-002: "));
+    Serial.println(tempCelsius2);
+    if (tempCelsius2 < tempCelsiusMin2) {
+      tempCelsiusMin2 = tempCelsius2;
+    }
+    if (tempCelsius2 > tempCelsiusMax2) {
+      tempCelsiusMax2 = tempCelsius2;
+    }
+  }
+  Serial.println("**************************************************************************************************************************************** ");
+  SerialMon.println(" ");
+}
+/**********************************END_READ_TERMISTOR*****************************************************/
