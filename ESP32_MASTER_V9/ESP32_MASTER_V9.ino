@@ -2,14 +2,16 @@
    NANO SMART IOT
 
    Controlador: ESP32 - WROOM
-   Date: 07/09/2023
+   Date: 15/09/2023
    Autor: Walter Dawid Retzer
    Comunicação: ESPNOW MASTER
-   Firmware: V1.0.0
+   Firmware: V1.0.1
    
-   Note: Configuração inicial de leitura dos 4 termistores do tipo NTC;
-         Exibição da Tela de Logo da Cervejaria;
-         Exibição da temperatura no display em formato de medidor analógico.
+   Note: Calibração dos sensores do tipo NTC e ajuste dos offset de leitura dos sensores dos Fermentadores FM-001 e FM-002;
+         Inclusão da verificação de estado de funcionamento da bomba de recirculação;
+         Ajuste do envio das leituras das temperaturas em formato double durante a comunicação ESP-NOW;
+         Correção do bug dos valores max e min do TI-002;
+         Ajuste da orientação da tela do display TFT.
 */
 
 #include <esp_now.h>
@@ -52,11 +54,11 @@ int32_t data1 = 0;
 int32_t data2 = 0;
 int32_t data3 = 0;
 int32_t data4 = 0;
-int chillerState;
+int bombState;
 int camaraState;
 #define STATUS_CHILLER 16
-#define GND_CHILLER 25
-#define STATUS_CAMARA 17
+#define GND_CHILLER 17
+#define STATUS_CAMARA 25
 #define GND_CAMARA 25
 //========================================================================================================
 // Variaveis de Configuração da Comunicação ESPNOW do ESP32:
@@ -96,14 +98,14 @@ bool esp32 = true;
 int thermistorPin;
 double adcMax, vccThermistor;
 String TempReal;
-double R1 = 10000.0;     // resitor 10k
-double Beta = 3950.0;    // Beta value
-double To = 298.15;      // temperatura em Kelvin
-double Ro = 10000.0;     // resitor 10k em Paralelo
-double offsetTemp1 = 0;  // valor de offset da temperatura 1
-double offsetTemp2 = 0;  // valor de offset da temperatura 2
-double offsetTemp3 = 0;  // valor de offset da temperatura 3
-double offsetTemp4 = 0;  // valor de offset da temperatura 4
+double R1 = 10000.0;        // resitor 10k
+double Beta = 3950.0;       // Beta value
+double To = 298.15;         // temperatura em Kelvin
+double Ro = 10000.0;        // resitor 10k em Paralelo
+double offsetTemp1 = 3.40;  // valor de offset da temperatura 1
+double offsetTemp2 = 2.55;  // valor de offset da temperatura 2
+double offsetTemp3 = 0;     // valor de offset da temperatura 3
+double offsetTemp4 = 4.50;  // valor de offset da temperatura 4
 double tempCelsius = 0;
 double tempCelsius1 = 0;
 double tempCelsiusMax1 = 0;
@@ -189,7 +191,7 @@ void setup() {
   digitalWrite(GND_CAMARA, LOW);
 
   pinMode(STATUS_CHILLER, INPUT_PULLUP);  // Declara Pino do Status do CHILLER como entrada
-  pinMode(STATUS_CAMARA, INPUT_PULLUP);   // Declara Pino do Status do CAMARA FRIA como entrada
+  // pinMode(STATUS_CAMARA, INPUT_PULLUP);   // Declara Pino do Status do CAMARA FRIA como entrada
 
   startDisplayScreen();
   displaySetup();
@@ -212,8 +214,9 @@ void setup() {
 //========================================================================================================
 /****************************************LOOP************************************************************/
 void loop() {
-  chillerState = digitalRead(STATUS_CHILLER);
-  camaraState = digitalRead(STATUS_CAMARA);
+  bombState = digitalRead(STATUS_CHILLER);
+  // camaraState = digitalRead(STATUS_CAMARA);
+  camaraState = false;
 
   if (millis() - auxTimeLoop1 > intervaloLoop1) {
     displayLogoHalfMouth();
@@ -237,7 +240,7 @@ void loop() {
   }
 
   if (millis() - auxTimeLoop4 > intervaloLoop4) {
-    showTempThermistor3();
+    showTempThermistor1();
     reseteMinMaxValues();
     auxTimeLoop1 = millis();
     auxTimeLoop2 = millis();
@@ -246,7 +249,7 @@ void loop() {
   }
 
   if (millis() - auxTimeLoop5 > intervaloLoop5) {
-    showTempThermistor4();
+    showTempThermistor2();
     reseteMinMaxValues();
     auxTimeLoop1 = millis();
     auxTimeLoop2 = millis();
@@ -690,7 +693,7 @@ void readTermistor(adc1_channel_t channel, int thermistorPin) {
   }
 
   if (channel == 5) {
-    tempCelsius4 = tempCelsius - offsetTemp4;
+    tempCelsius4 = tempCelsius + offsetTemp4;
     data4 = int32_t(round(tempCelsius4));
     Serial.print(F("Temperatura Celsius TI-004: "));
     Serial.println(tempCelsius4);
@@ -705,7 +708,7 @@ void readTermistor(adc1_channel_t channel, int thermistorPin) {
   }
 
   if (channel == 6) {
-    tempCelsius1 = tempCelsius - offsetTemp1;
+    tempCelsius1 = tempCelsius + offsetTemp1;
     data1 = int32_t(round(tempCelsius1));
     Serial.print(F("Temperatura Celsius TI-001: "));
     Serial.println(tempCelsius1);
@@ -720,7 +723,7 @@ void readTermistor(adc1_channel_t channel, int thermistorPin) {
   }
 
   if (channel == 7) {
-    tempCelsius2 = tempCelsius - offsetTemp2;
+    tempCelsius2 = tempCelsius + offsetTemp2;
     data2 = int32_t(round(tempCelsius2));
     Serial.print(F("Temperatura Celsius TI-002: "));
     Serial.println(tempCelsius2);
@@ -729,8 +732,8 @@ void readTermistor(adc1_channel_t channel, int thermistorPin) {
     if (tempCelsius2 < tempCelsiusMin2) {
       tempCelsiusMin2 = tempCelsius2;
     }
-    if (tempCelsius > tempCelsiusMax2) {
-      tempCelsiusMax2 = tempCelsius;
+    if (tempCelsius2 > tempCelsiusMax2) {
+      tempCelsiusMax2 = tempCelsius2;
     }
   }
 }
@@ -741,7 +744,7 @@ void readTermistor(adc1_channel_t channel, int thermistorPin) {
 /********************************CONFIG_DISPLAY_SETUP*****************************************************/
 void startDisplayScreen() {
   tft.fillScreen(TFT_BLACK);
-  tft.setRotation(0);
+  tft.setRotation(2);
   for (int i = 0; i < 10000; i++) {
     tft.drawPixel(random(320), random(480), random(0xFFFF));
   }
@@ -762,7 +765,7 @@ void startDisplayScreen() {
   tft.setCursor(80, 475);
   tft.setTextColor(TFT_WHITE);
   tft.setFreeFont(FF21);
-  tft.print(F("Firmware: v1.0.10"));
+  tft.print(F("Firmware: v1.0.1"));
 
   tft.setCursor(5, 396);
   tft.setTextColor(TFT_CYAN);
@@ -1111,14 +1114,14 @@ void deletePeer() {
 /******************************SEND_DATA_TO_SLAVE_DEVICE**************************************************/
 void sendData() {
   jsonData = "";
-  doc["CHILLER-001"] = !chillerState;  //status de chiller ligado quando receber GND no pin16
-  doc["CAMARA-001"] = !camaraState;    //status de camara fria ligado quando receber GND no pin17
-  doc["TI-001"] = data1;
-  doc["TI-002"] = data2;
-  doc["TI-003"] = data3;
-  doc["TI-004"] = data4;
+  doc["BOMB-001"] = !bombState;     //status de chiller ligado quando receber GND no pin16
+  doc["CAMARA-001"] = camaraState;  //status de camara fria ligado quando receber GND no pin17
+  doc["TI-001"] = tempCelsius1;
+  doc["TI-002"] = tempCelsius2;
+  doc["TI-003"] = tempCelsius3;
+  doc["TI-004"] = tempCelsius4;
 
-  size_t length = sizeof(jsonData) * 6;
+  size_t length = sizeof(jsonData) * 10;
   serializeJson(doc, jsonData);
 
   const uint8_t *peer_addr = slave.peer_addr;
@@ -1405,7 +1408,7 @@ float sineWave(int phase) {
 /***************************************LOGO_CERVEJARIA******************************************************/
 void displayLogoHalfMouth() {
   tft.fillScreen(TFT_WHITE);
-  tft.setRotation(0);
+  tft.setRotation(2);
   drawSdJpeg("/logoV3.jpg", 70, 150);
   tft.setFreeFont(FF44);
   tft.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -1577,13 +1580,13 @@ void displayReport() {
 
   tft.drawLine(0, 400, 320, 400, TFT_LIGHTGREY);
 
-  chillerState = digitalRead(STATUS_CHILLER);
+  bombState = digitalRead(STATUS_CHILLER);
   tft.setCursor(5, 425);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setFreeFont(FF18);
-  tft.print(F("CHILLER: "));
+  tft.print(F("BOMBA: "));
   tft.setFreeFont(FF18);
-  if (!chillerState) {
+  if (!bombState) {
     tft.setTextColor(TFT_ORANGE, TFT_BLACK);
     tft.print(F("Ligado"));
   } else {
@@ -1599,7 +1602,7 @@ void displayReport() {
   tft.setFreeFont(FF18);
   tft.print(F("CAMERA FRIA: "));
   tft.setFreeFont(FF18);
-  if (!camaraState) {
+  if (camaraState) {
     tft.setTextColor(TFT_ORANGE, TFT_BLACK);
     tft.print(F("Ligado"));
   } else {
